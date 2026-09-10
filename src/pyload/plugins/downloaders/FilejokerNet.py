@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import io
 import json
 import os
@@ -40,7 +38,7 @@ class XCaptcha:
 
     def _load_image(self, url):
         img_data = self.plugin.load(
-            self.plugin.fixurl(url), ref=self.pyfile.url, decode=False
+            self.plugin.fixurl(url), referrer=self.pyfile.url, decode=False
         )
         s = io.BytesIO()
         s.write(img_data)
@@ -334,17 +332,15 @@ class FilejokerNet(XFSDownloader):
 
                     captcha_inputs[_k] = _v.strip('" ')
 
-                self.req.http.c.setopt(
-                    pycurl.HTTPHEADER, ["X-Requested-With: XMLHttpRequest"]
-                )
+                self.req.http.set_header("X-Requested-With", "XMLHttpRequest")
 
                 html = self.load(
                     urllib.parse.urljoin(self.pyfile.url, "/ddl"),
                     post=captcha_inputs,
-                    ref=self.pyfile.url
+                    referrer=self.pyfile.url
                 )
 
-                self.req.http.c.setopt(pycurl.HTTPHEADER, ["X-Requested-With:"])
+                self.req.http.remove_header("X-Requested-With")
 
                 if html == "OK":
                     self.captcha.correct()
@@ -359,7 +355,7 @@ class FilejokerNet(XFSDownloader):
         api_data = self.api_request(
             "download1",
             file_code=self.info["pattern"]["ID"],
-            session=self.account.info["data"]["session"],
+            session=self.account.get_data("session"),
         )
 
         if "error" in api_data:
@@ -376,7 +372,7 @@ class FilejokerNet(XFSDownloader):
             "download2",
             file_code=self.info["pattern"]["ID"],
             download_id=api_data["download_id"],
-            session=self.account.info["data"]["session"],
+            session=self.account.get_data("session"),
         )
 
         if "error" in api_data:

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import json
 import re
 
@@ -41,7 +39,7 @@ class PremiumTo(MultiDownloader):
             self.API_URL + "getfile.php",
             get={
                 "userid": self.account.user,
-                "apikey": self.account.info["login"]["password"],
+                "apikey": self.account.get_login("password"),
                 "link": pyfile.url,
             },
             disposition=True,

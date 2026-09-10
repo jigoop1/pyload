@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import base64
 import json
 import time
@@ -13,7 +11,7 @@ from ..base.addon import BaseAddon, threaded
 class AntiCaptcha(BaseAddon):
     __name__ = "AntiCaptcha"
     __type__ = "addon"
-    __version__ = "0.03"
+    __version__ = "0.04"
     __status__ = "testing"
 
     __config__ = [
@@ -22,8 +20,9 @@ class AntiCaptcha(BaseAddon):
         ("solve_image", "bool", "Solve image catcha", True),
         ("solve_recaptcha", "bool", "Solve ReCaptcha", True),
         ("solve_hcaptcha", "bool", "Solve HCaptcha", True),
+        ("solve_turnstile", "bool", "Solve Turnstile", True),
         ("refund", "bool", "Request refund if result incorrect", False),
-        ("api_url", "password", "API base URL", "https://api.anti-captcha.com/"),
+        ("api_url", "str", "API base URL", "https://api.anti-captcha.com/"),
         ("passkey", "password", "API key", ""),
         ("timeout", "int", "Timeout in seconds (min 60, max 3999)", "900"),
     ]
@@ -37,6 +36,7 @@ class AntiCaptcha(BaseAddon):
     TASK_TYPES = {
         "ReCaptcha": "RecaptchaV2TaskProxyless",
         "HCaptcha": "HCaptchaTaskProxyless",
+        "Turnstile": "TurnstileTaskProxyless"
     }
 
     # See https://anti-captcha.com/apidoc
@@ -52,7 +52,7 @@ class AntiCaptcha(BaseAddon):
         credits = self.db.retrieve("credits", {"balance": 0, "time": 0})
 
         #: Docs says: "Please don't call this method more often than once in 30 seconds"
-        if time.time() - credits["time"] >= 30:
+        if time.monotonic() - credits["time"] >= 30:
             api_data = self.api_request(
                 "getBalance", {"clientKey": self.config.get("passkey")}
             )
@@ -60,7 +60,7 @@ class AntiCaptcha(BaseAddon):
                 self.log_error(self._("API error"), api_data["errorDescription"])
                 return 0
 
-            credits = {"balance": api_data["balance"], "time": time.time()}
+            credits = {"balance": api_data["balance"], "time": time.monotonic()}
             self.db.store("credits", credits)
 
         balance = credits["balance"]
@@ -142,6 +142,9 @@ class AntiCaptcha(BaseAddon):
                 if captcha_plugin in ("HCaptcha", "ReCaptcha"):
                     result = api_data["solution"]["gRecaptchaResponse"]
 
+                elif captcha_plugin == "Turnstile":
+                    result = api_data["solution"]["token"]
+
                 elif task.is_textual():
                     result = api_data["solution"]["text"]
 
@@ -160,6 +163,8 @@ class AntiCaptcha(BaseAddon):
             if captcha_plugin == "ReCaptcha" and not self.config.get("solve_recaptcha"):
                 return
             elif captcha_plugin == "HCaptcha" and not self.config.get("solve_hcaptcha"):
+                return
+            elif captcha_plugin == "Turnstile" and not self.config.get("solve_turnstile"):
                 return
 
         else:
@@ -201,6 +206,8 @@ class AntiCaptcha(BaseAddon):
 
         if task.captcha_params["captcha_plugin"] == "ReCaptcha":
             method = "reportIncorrectRecaptcha"
+        elif task.captcha_params["captcha_plugin"] == "Hcaptcha":
+            method = "reportIncorrectHcaptcha"
         elif task.is_textual():
             method = "reportIncorrectImageCaptcha"
         else:

@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import re
 
 from pyload.core.network.http.exceptions import BadHeader
@@ -142,7 +140,7 @@ class SimpleDecrypter(BaseDecrypter):
                 account_name, self.account.user
             )
             # NOTE: Don't call get_info here to reduce overhead
-            self.premium = self.account.info["data"]["premium"]
+            self.premium = self.account.get_data("premium")
         else:
             self.req = self.pyload.request_factory.get_request(account_name)
             self.premium = False
@@ -168,7 +166,7 @@ class SimpleDecrypter(BaseDecrypter):
             return
 
         self.data = self.load(
-            self.pyfile.url, cookies=self.COOKIES, ref=False, decode=self.TEXT_ENCODING
+            self.pyfile.url, cookies=self.COOKIES, referrer=False, decode=self.TEXT_ENCODING
         )
 
     def _prepare(self):

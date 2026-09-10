@@ -13,9 +13,11 @@ concurrency:
 
 jobs:
   action:
+    permissions:
+      issues: write
     runs-on: ubuntu-latest
     steps:
-      - uses: dessant/lock-threads@v5
+      - uses: dessant/lock-threads@v6
         with:
           issue-inactive-days: "90"
           exclude-any-issue-labels: "checking,help wanted"

@@ -1,22 +1,19 @@
-# -*- coding: utf-8 -*-
-
 import os
-import re
 import subprocess
 import time
 from datetime import timedelta
-from random import choice
 from threading import Event, Lock
 
-# import pycurl
-
 from ..datatypes.pyfile import PyFile
-from ..network.request_factory import get_url
 from ..threads.decrypter_thread import DecrypterThread
 from ..threads.download_thread import DownloadThread
 from ..threads.info_thread import InfoThread
 from ..utils import fs
 from ..utils.struct.lock import lock
+from ..utils.web.check import get_public_address
+
+# import pycurl
+
 
 
 class ThreadManager:
@@ -71,7 +68,7 @@ class ThreadManager:
         start a thread which fetches online status and other infos
         data = [ .. () .. ]
         """
-        self.timestamp = time.time() + timedelta(minutes=5).total_seconds()
+        self.timestamp = time.monotonic() + timedelta(minutes=5).total_seconds()
 
         InfoThread(self, data, pid)
 
@@ -80,7 +77,7 @@ class ThreadManager:
         """
         creates a thread to fetch online status, returns result id.
         """
-        self.timestamp = time.time() + timedelta(minutes=5).total_seconds()
+        self.timestamp = time.monotonic() + timedelta(minutes=5).total_seconds()
 
         rid = self.result_ids
         self.result_ids += 1
@@ -94,17 +91,15 @@ class ThreadManager:
         """
         returns result and clears it.
         """
-        self.timestamp = time.time() + timedelta(minutes=5).total_seconds()
+        self.timestamp = time.monotonic() + timedelta(minutes=5).total_seconds()
 
-        if rid in self.info_results:
-            data = self.info_results[rid]
-            self.info_results[rid] = {}
-            return data
-        else:
-            return {}
+        data = self.info_results.pop(rid, {})
+        return data
 
     @lock
     def set_info_results(self, rid, result):
+        if rid not in self.info_results:
+            self.info_results[rid] = {}
         self.info_results[rid].update(result)
 
     def get_active_files(self):
@@ -136,7 +131,6 @@ class ThreadManager:
                 stack_info=self.pyload.debug > 2,
             )
             self.reconnecting.clear()
-        self.check_thread_count()
 
         try:
             self.assign_job()
@@ -151,7 +145,7 @@ class ThreadManager:
             # it may be failed non-critical so we try it again
             self.assign_job()
 
-        if (self.info_cache or self.info_results) and self.timestamp < time.time():
+        if (self.info_cache or self.info_results) and self.timestamp < time.monotonic():
             self.info_cache.clear()
             self.info_results.clear()
             self.pyload.log.debug("Cleared Result cache")
@@ -192,7 +186,7 @@ class ThreadManager:
         ) != 0:
             time.sleep(0.25)
 
-        old_ip = self.get_ip()
+        old_ip = get_public_address()
 
         self.pyload.addon_manager.before_reconnect(old_ip)
 
@@ -207,49 +201,29 @@ class ThreadManager:
             return
 
         time.sleep(1)
-        ip = self.get_ip()
-        self.pyload.addon_manager.after_reconnect(ip, old_ip)
+        new_ip = get_public_address()
+        self.pyload.addon_manager.after_reconnect(new_ip, old_ip)
 
-        self.pyload.log.info(self._("Reconnected, new IP: {}").format(ip))
+        self.pyload.log.info(self._("Reconnected, new IP: {}").format(new_ip))
 
         self.reconnecting.clear()
 
-    def get_ip(self):
-        """
-        retrieve current ip.
-        """
-        services = [
-            ("https://icanhazip.com/", r"(\S+)"),
-            ("http://checkip.dyndns.org/", r".*Current IP Address: (\S+)</body>.*"),
-            ("https://ifconfig.io/ip", r"(\S+)"),
-        ]
-
-        ip = ""
-        for i in range(10):
-            try:
-                sv = choice(services)
-                ip = get_url(sv[0])
-                ip = re.match(sv[1], ip).group(1)
-                break
-            except Exception:
-                ip = ""
-                time.sleep(1)
-
-        return ip
-
-    # ----------------------------------------------------------------------
-    def check_thread_count(self):
+    def check_thread_count(self, extra=0):
         """
         checks if there are need for increasing or reducing thread count.
         """
-        if len(self.threads) == self.pyload.config.get("download", "max_downloads"):
-            return True
-        elif len(self.threads) < self.pyload.config.get("download", "max_downloads"):
+        target_count = self.pyload.config.get("download", "max_downloads") + extra
+        if len(self.threads) == target_count:
+            # thread count matches, do nothing
+            return
+        elif len(self.threads) < target_count:
+            # we need to increase thread count, add one thread
             self.create_download_thread()
         else:
-            free = [x for x in self.threads if not x.active]
-            if free:
-                free[0].put("quit")
+            # we need to decrease thread count, remove one thread
+            idle_threads = [x for x in self.threads if not x.active]
+            if idle_threads:
+                idle_threads[0].stop()
 
     # def clean_pycurl(self):
     # """
@@ -274,42 +248,47 @@ class ThreadManager:
         # if self.downloaded > 20:
         #    if not self.clean_pycurl(): return
 
-        free_threads = [x for x in self.threads if not x.active]
-
-        inuse_plugins = set(
-            [
-                (x.active.pluginname, self.get_limit(x))
-                for x in self.threads
-                if x.active and x.active.has_plugin()
-            ]
-        )
-        # (pluginname, dl_limit, active_count)
-        inuse_plugins = [
-            (
-                x[0],
-                x[1],
-                len(
-                    [
-                        y
-                        for y in self.threads
-                        if y.active and y.active.pluginname == x[0]
-                    ]
-                ),
-            )
-            for x in inuse_plugins
+        inuse_plugin_threads = [
+            x
+            for x in self.threads
+            if x.active and x.active.has_plugin()
         ]
 
-        over_limit_plugins = [x[0] for x in inuse_plugins if x[2] >= x[1] > 0]
-
-        occupied_plugins = sorted(
+        # (plugin_name, dl_limit, active_count)
+        inuse_plugins = set(
             [
-                x.active.pluginname
-                for x in self.threads
-                if x.active and x.active.has_plugin() and not x.active.plugin.multi_dl
+                (
+                    x.active.pluginname,
+                    self.get_limit(x),
+                    len([y for y in self.threads if y.active and y.active.pluginname == x.active.pluginname]),
+                )
+                for x in inuse_plugin_threads
             ]
-            + over_limit_plugins
         )
 
+        # plugins that are over their download limit (e.g., 3 active download for a plugin with limit 3)
+        over_limit_plugins = [
+            x[0] for x in inuse_plugins
+            if x[2] >= x[1] > 0
+        ]
+        # plugins that are waiting for a very long time (e.g., waiting for download slot)
+        long_waiting_plugins = [
+            x.active.pluginname
+            for x in inuse_plugin_threads
+            if getattr(x.active.plugin, "long_waiting", False)
+        ]
+        # non-parallel plugins are those that do not support multiple simultaneous downloads
+        non_parallel_plugins = [
+            x.active.pluginname
+            for x in inuse_plugin_threads
+            if not getattr(x.active.plugin, "multi_dl", True)
+        ]
+
+        # long waiting plugins are not counted towards the download limit, so we add them as extra
+        self.check_thread_count(extra=len(long_waiting_plugins))
+        free_threads = [x for x in self.threads if not x.active]
+
+        occupied_plugins = sorted(over_limit_plugins + long_waiting_plugins + non_parallel_plugins)
         occupied_plugins = tuple(set(occupied_plugins))  # remove duplicates
         job = self.pyload.files.get_job(occupied_plugins)
         if job:

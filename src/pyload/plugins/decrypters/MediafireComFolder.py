@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import json
 
 from ..base.decrypter import BaseDecrypter
@@ -8,10 +6,10 @@ from ..base.decrypter import BaseDecrypter
 class MediafireComFolder(BaseDecrypter):
     __name__ = "MediafireComFolder"
     __type__ = "decrypter"
-    __version__ = "0.25"
+    __version__ = "0.26"
     __status__ = "testing"
 
-    __pattern__ = r"https?://(?:www\.)?mediafire\.com/(?:folder/|\?sharekey=|\?)(?P<ID>\w+)"
+    __pattern__ = r"https?://(?:www\.)?mediafire\.com/(?:folder/|\?sharekey=)(?P<ID>\w+)"
     __config__ = [
         ("enabled", "bool", "Activated", True),
         ("use_premium", "bool", "Use premium account if available", True),

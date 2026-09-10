@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import operator
 import os
 import re
@@ -8,6 +6,7 @@ import time
 from datetime import timedelta
 
 from pyload import PKGDIR
+from pyload.core.utils.fs import safejoin
 
 from ..base.addon import BaseAddon, expose, threaded
 from ..helpers import exists
@@ -51,7 +50,7 @@ class UpdateManager(BaseAddon):
         self.periodical.start(10)
 
     def init(self):
-        self.info.update({"pyload": False, "plugins": False, "last_check": time.time()})
+        self.info.update({"pyload": False, "plugins": False, "last_check": time.monotonic()})
         self.mtimes = {}  #: Store modification time for each plugin
         self.event_map = {"all_downloads_processed": "all_downloads_processed"}
 
@@ -77,7 +76,7 @@ class UpdateManager(BaseAddon):
 
         if (
             self.config.get("checkperiod")
-            and time.time()
+            and time.monotonic()
             - max(
                 self.MIN_CHECK_INTERVAL,
                 timedelta(hours=self.config.get("checkinterval")).total_seconds(),
@@ -175,7 +174,7 @@ class UpdateManager(BaseAddon):
         newversion = self.server_response(0)
 
         self.info["pyload"] = False
-        self.info["last_check"] = time.time()
+        self.info["last_check"] = time.monotonic()
 
         if not newversion:
             exitcode = 0
@@ -411,7 +410,7 @@ class UpdateManager(BaseAddon):
             rootplugins = os.path.join(PKGDIR, "plugins")
 
             for basedir in (userplugins, rootplugins):
-                py_filename = os.path.join(basedir, plugin_type, plugin_name + ".py")
+                py_filename = safejoin(basedir, plugin_type, plugin_name + ".py")
                 pyc_filename = py_filename + "c"
 
                 if plugin_type == "addon":

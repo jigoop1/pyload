@@ -1,11 +1,10 @@
-# -*- coding: utf-8 -*-
-
 import os
 import re
 import subprocess
 
 from pyload import PKGDIR
 from pyload.core.utils.convert import to_str
+from pyload.core.utils.fs import safejoin
 from pyload.plugins.base.extractor import ArchiveError, BaseExtractor, CRCError, PasswordError
 from pyload.plugins.helpers import renice
 
@@ -13,7 +12,7 @@ from pyload.plugins.helpers import renice
 class UnRar(BaseExtractor):
     __name__ = "UnRar"
     __type__ = "extractor"
-    __version__ = "1.48"
+    __version__ = "1.49"
     __status__ = "testing"
 
     __config__ = [
@@ -68,7 +67,7 @@ class UnRar(BaseExtractor):
     def find(cls):
         try:
             if os.name == "nt":
-                cls.CMD = os.path.join(PKGDIR, "lib", "RAR.exe")
+                cls.CMD = safejoin(PKGDIR, "lib", "RAR.exe")
             else:
                 cls.CMD = "rar"
 
@@ -81,7 +80,7 @@ class UnRar(BaseExtractor):
         except OSError:
             try:
                 if os.name == "nt":
-                    cls.CMD = os.path.join(PKGDIR, "lib", "UnRAR.exe")
+                    cls.CMD = safejoin(PKGDIR, "lib", "UnRAR.exe")
                 else:
                     cls.CMD = "unrar"
 
@@ -108,12 +107,13 @@ class UnRar(BaseExtractor):
 
     def init(self):
         self.smallest = None
+        self.files_raw = None
         self.archive_encryption = None
 
     def verify(self, password=None):
         #: First we check if the header (file list) is protected
-        #: if the header is protected, we cen verify the password very fast without hassle
-        #: otherwise, we find the smallest file in the archive and then try to extract it
+        #: if the header is protected, we cen verify the password very fast without hassle.
+        #: otherwise we find the smallest file in the archive and then try to extract it
         encrypted_header, encrypted_files = self._check_archive_encryption()
         if encrypted_header:
             p = self.call_cmd("l", "-v", self.filename, password=password)
@@ -129,7 +129,7 @@ class UnRar(BaseExtractor):
                 raise ArchiveError("Cannot find smallest file")
 
             try:
-                extracted = os.path.join(self.dest, smallest if self.fullpath else os.path.basename(smallest))
+                extracted = safejoin(self.dest, smallest if self.fullpath else os.path.basename(smallest))
                 try:
                     os.remove(extracted)
                 except OSError:
@@ -169,7 +169,7 @@ class UnRar(BaseExtractor):
                 dir = os.path.dirname(self.filename)
                 name = self._RE_FIXNAME.search(out).group(1)
 
-                self.filename = os.path.join(dir, name)
+                self.filename = safejoin(dir, name)
 
         return True
 
@@ -193,6 +193,11 @@ class UnRar(BaseExtractor):
 
     def extract(self, password=None, file=None):
         command = "x" if self.fullpath else "e"
+
+        # Validate file list BEFORE extraction to prevent path traversal
+        file_list = self._list_raw(password)
+        if file_list:
+            self._validate_archive_entries(file_list)
 
         p = self.call_cmd(command, self.filename, file, self.dest, password=password)
 
@@ -218,7 +223,7 @@ class UnRar(BaseExtractor):
         if p.returncode and p.returncode != 10:  #: RARX_NOFILES:
             raise ArchiveError(self._("Process return code: {}").format(p.returncode))
 
-        return self.list(password)
+        return self.files
 
     def chunks(self):
         files = []
@@ -226,7 +231,7 @@ class UnRar(BaseExtractor):
 
         #: eventually multi-part files
         files.extend(
-            os.path.join(dir, os.path.basename(_f))
+            safejoin(dir, os.path.basename(_f))
             for _f in filter(self.ismultipart, os.listdir(dir))
             if self._RE_PART.sub("", name) == self._RE_PART.sub("", _f)
         )
@@ -280,6 +285,9 @@ class UnRar(BaseExtractor):
         if self.config.get("ignore_file_attributes", False):
             args.append("-ai")
 
+        # Skip symbolic links to prevent symlink escape attacks
+        args.append("-ol-")
+
         # NOTE: return codes are not reliable, some kind of threading, cleanup
         # whatever issue
         call = [self.CMD, command] + args + [arg for arg in xargs if arg]
@@ -303,6 +311,12 @@ class UnRar(BaseExtractor):
 
         return self.archive_encryption
 
+    def _list_raw(self, password=None):
+        if not self.files_raw:
+            self._find_smallest_file(password)
+
+        return self.files_raw
+
     def _find_smallest_file(self, password=None):
         if not self.smallest:
             command = "v" if self.fullpath else "l"
@@ -317,20 +331,24 @@ class UnRar(BaseExtractor):
 
             smallest = (None, 0)
             files = set()
+            files_raw = set()
             f_grp = 5 if float(self.VERSION) >= 5 else 1
             for groups in self._RE_FILES.findall(out):
                 s = int(groups[2])
                 f = groups[f_grp].strip()
+
+                files_raw.add(f)
 
                 if smallest[1] == 0 or smallest[1] > s > 0:
                     smallest = (f, s)
 
                 if not self.fullpath:
                     f = os.path.basename(f)
-                f = os.path.join(self.dest, f)
+                f = safejoin(self.dest, f)
                 files.add(f)
 
             self.smallest = smallest
+            self.files_raw = list(files_raw)
             self.files = list(files)
 
         return self.smallest

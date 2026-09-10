@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import json
 
 import pycurl
@@ -32,7 +30,7 @@ class AccioDebridCom(MultiDownloader):
 
     API_URL = "https://accio-debrid.com/apiv2/"
 
-    def api_response(self, action, get={}, post={}):
+    def api_response(self, action, get=None, post=None):
         get['action'] = action
 
         # Better use pyLoad User-Agent so we don't get blocked
@@ -45,7 +43,7 @@ class AccioDebridCom(MultiDownloader):
     def handle_premium(self, pyfile):
         try:
             res = self.api_response("getLink",
-                                    get=args(token=self.account.info['data']['cache_info'][self.account.user]['token']),
+                                    get=args(token=self.account.get_data('cache_info')[self.account.user]['token']),
                                     post=args(link=pyfile.url))
 
         except BadHeader as exc:

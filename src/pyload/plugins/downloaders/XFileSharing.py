@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import re
 
 from ..base.xfs_downloader import XFSDownloader
@@ -58,7 +56,7 @@ class XFileSharing(XFSDownloader):
                 self.PLUGIN_NAME, self.account.user
             )
             # NOTE: Don't call get_info here to reduce overhead
-            self.premium = self.account.info["data"]["premium"]
+            self.premium = self.account.get_data("premium")
         else:
             self.req = self.pyload.request_factory.get_request(self.classname)
             self.premium = False

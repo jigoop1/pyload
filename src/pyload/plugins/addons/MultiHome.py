@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import time
 
 from ..base.addon import BaseAddon
@@ -17,7 +15,7 @@ class Interface:
             return 0
 
     def use_for(self, plugin_name, account):
-        self.history[(plugin_name, account)] = time.time()
+        self.history[(plugin_name, account)] = time.monotonic()
 
     def __repr__(self):
         return "<Interface - {}>".format(self.address)

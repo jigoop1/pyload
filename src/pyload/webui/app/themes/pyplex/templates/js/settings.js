@@ -1,349 +1,629 @@
 {% autoescape true %}
 
-$(function() {
-    return new SettingsUI();
+$(() => {
+  window.settingsUI = new SettingsUI();
 });
 
 if (!String.prototype.startsWith) {
-  String.prototype.startsWith = function(searchString, position) {
-    position = position || 0;
+  String.prototype.startsWith = function(searchString, position = 0) {
     return this.indexOf(searchString, position) === position;
   };
 }
 
-SettingsUI = (function() {
-    function a() {
-        $("#quit_box").on('click', '#quit_button', function () {
-            $.get("{{url_for('api.rpc', func='kill')}}", function() {
-                $('#quit_box').modal('hide');
-                $('#content').addClass("hidden");
-                $('#shutdown_msg').removeClass("hidden");
-            })
-            .fail(function () {
-                indicateFail("{{_('Error occurred')}}");
-            });
-        });
+function timestampToLocalISOTime(timestamp) {
+  const offset = timestamp.getTimezoneOffset() * 60000;
+  const localISOTime = new Date(timestamp - offset).toISOString().slice(0, 16);
+  return localISOTime;
+}
 
-        $("#restart_box").on('click', '#restart_button', function () {
-            $.get("{{url_for('api.rpc', func='restart')}}", function() {
-                $('#restart_box').modal('hide');
-                $('#content').addClass("hidden");
-                $('#restart_msg').removeClass("hidden");
-                setTimeout(function() {
-                    window.location = "{{url_for('app.dashboard')}}";
-                }, 10000);
-            })
-            .fail(function () {
-                indicateFail("{{_('Error occurred')}}");
-            });
-        });
-        let activeTab = sessionStorage.getItem('activeTab');
-        if (activeTab) {
-            sessionStorage.removeItem('activeTab');
-            $('#toptabs a[href="' + activeTab + '"]').tab('show');
-        }
-        $('a[data-toggle="tab"]').on('shown.bs.tab', function(event) {
-            if (event.target !== event.relatedTarget && $(event.target).attr("href") === "#accounts") {
-                $('#account_form input[type=checkbox]').each(function() {
-                    $(this).prop("checked", false);
-                })
-            }
-        });
+class SettingsUI {
+  constructor() {
+    this.generalPanel = $("#core_form_content");
+    this.pluginPanel = $("#plugin_form_content");
 
-        generalPanel = $("#core_form_content");
-        pluginPanel = $("#plugin_form_content");
-        thisObject = this;
-        $("#core-menu").find("li").each(function(a) {
-            $(this).click(thisObject.menuClick);
-        });
+    this.initEventListeners();
+    this.initUsersAdmin();
+    this.initPluginSearch();
+    this.initPathChooser();
+    this.apikeysUI = new ApikeysUI();
 
-        $("#core_submit").click(this.configSubmit);
-        $("#plugin_submit").click(this.configSubmit);
-        $("#account_add_button").click(this.addAccount);
-        $("#account_submit").click(this.submitAccounts);
-        $("#account_add").click(function() {
-            $("#add_account_form").trigger("reset");
-        });
-        $("#user_submit").click(this.submitUsers);
-
-        this.initUsersAdmin();
-        this.initPluginSearch();
-        this.initPathcooser();
+    const activeTab = sessionStorage.getItem('activeTab');
+    if (activeTab) {
+      sessionStorage.removeItem('activeTab');
+      $(`#toptabs a[href="${activeTab}"]`).tab('show');
     }
-    a.prototype.initUsersAdmin = function() {
-        $("#password_box").on('click', '#login_password_button', function (event) {
-            let passwd = $("#login_new_password").val();
-            let passwdConfirm = $("#login_new_password2").val();
-            if (passwd === passwdConfirm) {
-                $.ajax({
-                    method: "post",
-                    url: "{{url_for('json.change_password')}}",
-                    data: $("#password_form").serialize(),
-                    async: true,
-                    success: function () {
-                        indicateSuccess("{{_('Password successfully changed')}}");
-                    }
-                })
-                    .fail(function () {
-                        indicateFail("{{_('Error occurred')}}");
-                    });
-                $('#password_box').modal('hide');
-            } else {
-                alert("{{_('Passwords did not match.')}}")
-            }
-            event.stopPropagation();
-            event.preventDefault();
+  };
+
+  initEventListeners() {
+    $("#quit-pyload").click(() => {
+      uiHandler.yesNoDialog("{{_('Are you really sure you want to quit pyLoad?')}}", (answer) => {
+        if (answer) {
+          this.quitPyload();
+        }
+      });
+    });
+
+    $("#restart-pyload").click(() => {
+      uiHandler.yesNoDialog("{{_('Are you sure you want to restart pyLoad?')}}", (answer) => {
+        if (answer) {
+          this.restartPyload();
+        }
+      });
+    });
+
+    $('a[data-toggle="tab"]').on('shown.bs.tab', (event) => {
+      if (event.currentTarget !== event.relatedTarget && $(event.currentTarget).attr("href") === "#accounts") {
+        $('#account_form input[type=checkbox]').prop("checked", false);
+      }
+    });
+
+    $("#core-menu").on('click', 'li', this.menuClick.bind(this));
+    $("#core_submit").click(this.configSubmit.bind(this));
+    $("#plugin_submit").click(this.configSubmit.bind(this));
+    $("#account_add_button").click(this.addAccount.bind(this));
+    $("#account_submit").click(this.submitAccounts.bind(this));
+    $("#account_add").click(() => $("#add_account_form").trigger("reset"));
+    {% if user.is_admin %}
+      $("#user_submit").click(this.submitUsers.bind(this));
+    {% endif %}
+  }
+
+  restartPyload() {
+    $.post("{{url_for('api.rpc', func='restart')}}")
+      .done(() => {
+        $('#restart_box').modal('hide');
+        $('#content').addClass("hidden");
+        $('#restart_msg').removeClass("hidden");
+        setTimeout(() => {
+          window.location = "{{url_for('app.dashboard')}}";
+        }, 10000);
+      })
+      .fail(() => {
+        uiHandler.indicateFail("{{_('Error occurred')}}");
+      });
+  };
+
+  quitPyload() {
+    $.post("{{url_for('api.rpc', func='kill')}}")
+      .done(() => {
+        $('#quit_box').modal('hide');
+        $('#content').addClass("hidden");
+        $('#shutdown_msg').removeClass("hidden");
+      })
+      .fail(() => {
+        uiHandler.indicateFail("{{_('Error occurred')}}");
+      });
+  };
+
+  initUsersAdmin() {
+    $("#password_box").on('click', '#login_password_button', (event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      const passwd = $("#user_newpw").val();
+      const $passwdConfirm = $("#user_confpw");
+      const passwdConfirm = $passwdConfirm.prop('disabled', true).val();
+      if (passwd === passwdConfirm) {
+        $.post({
+          url: "{{url_for('json.change_password')}}",
+          dataType: 'json',
+          contentType: 'application/json',
+          data: JSON.stringify(formToObject("#password_form")),
+          success: () => {
+            uiHandler.indicateSuccess("{{_('Password successfully changed')}}");
+          }
+        }).fail(() => {
+          uiHandler.indicateFail("{{_('Error occurred')}}");
+        }).always(() => {
+          $passwdConfirm.prop('disabled', false);
         });
-        $(".is_admin").each(function () {
-            let userName = $(this).attr("name").split("|")[0];
-            $(this).bind("change", {userName: userName}, function (event) {
-                let checked = $(this).is(":checked");
-                let permsList = $("#" + userName + "\\|perms");
-                permsList.attr('disabled', checked);
-                if (checked) {
-                    permsList.val([]);
-                }
+        $('#password_box').modal('hide');
+      } else {
+        alert("{{_('Passwords did not match.')}}");
+      }
+    });
+
+    $(document).on("change", ".is_admin", (event) => {
+      const userName = $(event.currentTarget).attr("name").split("|")[0];
+      const checked = $(event.currentTarget).is(":checked");
+      const permsList = $(`#${userName}\\|perms`);
+
+      permsList.prop("disabled", checked);
+      if (checked) {
+        permsList.val([]);
+      }
+    });
+
+    $(document).on("click", ".change_password", (event) => {
+      const userName = $(event.target).attr("id").split("|")[0];
+
+      $("#password_form").trigger("reset");
+      $("#password_box #user_login").val(userName);
+    });
+
+    $('#password_box').on('shown.bs.modal', () => {
+      $('#user_curpw').focus();
+    });
+
+    $("#user_add").click(() => {
+      $("#new_perms").prop('disabled', false);
+      $("#user_add_form").trigger("reset");
+    });
+
+    $(document).off("click", ".delete_user").on("click", ".delete_user", (event) => {
+      event.stopPropagation();
+      event.preventDefault();
+      const userName = $(event.currentTarget).attr("id").split("|")[0];
+      uiHandler.yesNoDialog("{{_('Are you sure you want to delete the user {}?')}}".replace("{}", userName), (answer) => {
+          if (answer) {
+            uiHandler.indicateLoad();
+            $.post({
+              url: "{{url_for('json.update_users')}}",
+              dataType: 'json',
+              contentType: 'application/json',
+              data: JSON.stringify({update_data: {[`${userName}|delete`]: true}}),
+              success: () => {
+                sessionStorage.setItem("activeTab", "#users");
+                window.location.assign(window.location.href.replace(/#.*$/, ''));
+              }
+            }).fail(() => {
+              uiHandler.indicateFail("{{_('Error occurred')}}");
             });
-        });
-        $(".change_password").each(function () {
-            let userName = $(this).attr("id").split("|")[1];
-            $(this).bind("click", {userName: userName}, function (event) {
-                $("#password_form").trigger("reset");
-                $("#password_box #user_login").val(userName);
-            });
-        });
-        $('#password_box').on('shown.bs.modal', function () {
-            $('#login_current_password').focus();
-        })
-        $("#user_add").click(function (event) {
-            $("#new_perms").attr('disabled', false);
-            $("#user_add_form").trigger("reset");
-        });
-        $("#new_role").change(function (event) {
-            let checked = $(this).is(":checked");
-            let permsList = $("#new_perms");
-            permsList.attr('disabled', checked);
-            if (checked) {
-                permsList.val([]);
+          }
+        }
+      );
+    });
+
+    $("#new_role").change((event) => {
+      const checked = $(event.currentTarget).is(":checked");
+      const permsList = $("#new_perms");
+      permsList.prop('disabled', checked);
+      if (checked) {
+        permsList.val([]);
+      }
+    });
+
+    $("#new_user_button").click((event) => {
+      $(this).prop('disabled', true);
+      const $userForm = $("#user_add_form");
+      const $userName = $("#new_user");
+      if ($userName.val().trim() === "") {
+        alert("{{_('Username must be filled out')}}");
+      } else {
+        $userName.val($userName.val().trim());
+        const passwd = $("#new_password").val();
+        const passwdConfirm = $("#new_password2").val();
+        if (passwd === passwdConfirm) {
+          $.post({
+            url: "{{url_for('json.add_user')}}",
+            data: $userForm.serialize(),
+            success: () => {
+              sessionStorage.setItem("activeTab", "#users");
+              window.location.assign(window.location.href.replace(/#.*$/, ''));
             }
+          }).fail(() => {
+            uiHandler.indicateFail("{{_('Error occurred')}}");
+          });
+          $('#user_box').modal('hide');
+        } else {
+          alert("{{_('Passwords did not match.')}}");
+        }
+      }
+      $(this).prop('disabled', false);
+      event.stopPropagation();
+      event.preventDefault();
+    });
+  }
+
+  initPluginSearch() {
+    const resultTemplate = $('#result-template').contents();
+    const noresultTemplate = $('#noresult-template').contents();
+    const pluginListPanel = $('#plugin-menu');
+    const searchInput = $('#query-text');
+    const pluginList = $('#plugins-list').data('plugin');
+
+    const search = (query) => {
+      let results = [];
+      if (query) {
+        results = pluginList.filter(p => p[1].toLowerCase().includes(query.toLowerCase()));
+      } else {
+        results = pluginList;
+      }
+
+      pluginListPanel.empty().on('click', 'li', this.menuClick.bind(this));
+
+      if (results.length) {
+        const $fragment = $(document.createDocumentFragment());
+        results.forEach(p => {
+          resultTemplate.clone().find('.plugin-row')
+            .attr('id', `plugin|${p[0]}`)
+            .text(p[1])
+            .removeAttr('class')
+            .end()
+            .appendTo($fragment);
         });
-        $("#new_user_button").click(function (event) {
-            $(this).attr('disabled', true);
-            let $userForm = $("#user_add_form");
-            let $userName = $("#new_user");
-            if ($userName.val().trim() === "") {
-                alert("{{_('Username must be filled out')}}");
-            } else {
-                $userName.val($userName.val().trim());
-                let passwd = $("#new_password").val();
-                let passwdConfirm = $("#new_password2").val();
-                if (passwd === passwdConfirm) {
-                    $.ajax({
-                        method: "post",
-                        url: "{{url_for('json.add_user')}}",
-                        async: true,
-                        data: $userForm.serialize(),
-                        success: function () {
-                            sessionStorage.setItem("activeTab", "#users");
-                            window.location.assign(window.location.href);
-                        }
-                    })
-                        .fail(function () {
-                            indicateFail("{{_('Error occurred')}}");
-                        });
-                    $('#user_box').modal('hide');
-                } else {
-                    alert("{{_('Passwords did not match.')}}")
-                }
-            }
-            $(this).attr('disabled', false);
-            event.stopPropagation();
-            event.preventDefault();
-        });
+        pluginListPanel.append($fragment);
+      } else {
+        pluginListPanel.append(noresultTemplate);
+      }
     };
-    a.prototype.initPluginSearch = function() {
-        var b, i;
-        resultTemplate = $('#result-template').contents();
-        noresultTemplate = $('#noresult-template').contents();
-        pluginListPanel = $('#plugin-menu');
-        searchInput = $('#query-text');
 
-        var pluginList = $('#plugins-list').data('plugin');
+    searchInput.attr('placeholder', "{{_('Name of plugin')}}");
+    searchInput.prop('disabled', false);
+    searchInput.on('input', () => {
+      const query = searchInput.val();
+      const visible = Boolean(query);
+      searchInput.siblings('.close').toggleClass('hidden', !visible);
+      search(query.trim());
+    });
+    searchInput.siblings('.close').click(() => {
+      searchInput.val('').focus().trigger('input');
+    });
+    searchInput.focus();
+    searchInput.trigger('input');
+  }
 
-        function search(query) {
-            var results = [];
-            if (query) {
-                pluginList.forEach(function(p) {
-                    if (p[1].toLowerCase().startsWith(query.toLowerCase())) {
-                        results.push(p);
-                    }
-                })
+  menuClick(event) {
+    const [category, section] = $(event.currentTarget).attr('id').split('|');
+    const panel = category === 'core' ? this.generalPanel : this.pluginPanel;
+    $.get({
+      url: "{{url_for('json.load_config')}}",
+      data: { category, section },
+      traditional: true,
+      success: (response) => {
+        panel.html(response);
+
+        // Inject client-side-only setting when webui section is shown
+        if (category === 'core' && section === 'webui') {
+          const $table = panel.find('table.settable').first();
+          if ($table.length > 0 && $table.find('#client_reset_yesno_row').length === 0) {
+            const $row = $(`<tr id="client_reset_yesno_row">
+              <td><label for="client_reset_yesno" style="font-size: 14px; font-weight: 400;">{{_('Reset "Don\'t ask again" answers')}}:</label></td>
+              <td>
+                <input type="checkbox" id="client_reset_yesno"/>
+              </td>
+            </tr>`);
+            $table.append($row);
+            $('#client_reset_yesno').on('change', (event) => {
+              localStorage.setItem("ui.reset_yesno", event.target.checked);
+            });
+            const $checkbox = $('#client_reset_yesno');
+            if (sessionStorage.getItem('yesNoSettings') === null) {
+              $checkbox.prop('checked', true);
+              $checkbox.prop('disabled', true);
             } else {
-                results = pluginList;
+              $checkbox.prop('checked', false);
+              $checkbox.prop('disabled', false);
             }
+          }
+        }
+      }
+    });
+  }
 
-            pluginListPanel.empty();
+  configSubmit(event) {
+    const category = $(event.currentTarget).attr('id').split("_")[0];
+    $.post({
+      url: "{{url_for('json.save_config')}}",
+      dataType: 'json',
+      contentType: 'application/json',
+      data: JSON.stringify({category: category, config: formToObject(`#${category}_form`)}),
+      success: () => {
+        if (localStorage.getItem('ui.reset_yesno') === 'true') {
+          sessionStorage.removeItem('yesNoSettings');
+        }
+        $('#client_reset_yesno').prop('checked', false);
+        localStorage.removeItem("ui.reset_yesno");
+        uiHandler.indicateSuccess("{{_('Settings saved')}}");
+      }
+    }).fail(() => {
+      uiHandler.indicateFail("{{_('Error occurred')}}");
+    });
+    event.stopPropagation();
+    event.preventDefault();
+  }
 
-            if (results.length) {
-                results.forEach(function (p) {
-                    resultTemplate.clone().find('.plugin-row')
-                        .attr('id', 'plugin|'.concat(p[0]))
-                        .text(p[1])
-                        .removeAttr('class')
-                        .click(thisObject.menuClick)
-                        .end().appendTo(pluginListPanel);
-                });
-            } else {
-                pluginListPanel.append(noresultTemplate);
-            }
+  addAccount(event) {
+    $(event.currentTarget).prop('disabled', true);
+    $.post({
+      url: "{{url_for('json.add_account')}}",
+      dataType: 'json',
+      contentType: 'application/json',
+      data: JSON.stringify(formToObject("#add_account_form")),
+      success: () => {
+        sessionStorage.setItem("activeTab", "#accounts");
+        window.location.assign(window.location.href.replace(/#.*$/, ''));
+      }
+    }).fail(() => {
+      uiHandler.indicateFail("{{_('Error occurred')}}");
+    });
+    event.preventDefault();
+  }
+
+  submitUsers(event) {
+    uiHandler.indicateLoad();
+    $.post({
+      url: "{{url_for('json.update_users')}}",
+      dataType: 'json',
+      contentType: 'application/json',
+      data: JSON.stringify({update_data: formToObject("#user_form")}),
+      success: () => {
+        sessionStorage.setItem("activeTab", "#users");
+        window.location.assign(window.location.href.replace(/#.*$/, ''));
+      }
+    }).fail(() => {
+      uiHandler.indicateFail("{{_('Error occurred')}}");
+    });
+    event.preventDefault();
+  }
+
+  submitAccounts(event) {
+    uiHandler.indicateLoad();
+    $.post({
+      url: "{{url_for('json.update_accounts')}}",
+      data: $("#account_form").serialize(),
+      success: () => {
+        sessionStorage.setItem("activeTab", "#accounts");
+        window.location.assign(window.location.href.replace(/#.*$/, ''));
+      }
+    }).fail(() => {
+      uiHandler.indicateFail("{{_('Error occurred')}}");
+    });
+    event.preventDefault();
+  }
+
+  initPathChooser() {
+    $("#path_type0, #path_type1").click(() => {
+      const iframe = document.getElementById('chooser_ifrm').contentWindow;
+      const isAbsolute = $(this).val() === "1";
+      if (isAbsolute !== iframe.isabsolute) {
+        iframe.location.href = isAbsolute ? iframe.abspath : iframe.relpath;
+      }
+      return false;
+    });
+
+    $("#path_chooser").on("show.bs.modal", (e) => {
+      const chooserIfrm = $(e.currentTarget).find("#chooser_ifrm");
+      const browseFor = $(e.relatedTarget).data('browsefor');
+      const targetInput = $(e.relatedTarget).data('targetinput').replace("|", "\\|");
+
+      if (browseFor) {
+        chooserIfrm.height(Math.max($(window).height() - 200, 150));
+        const val = targetInput ? encodeURIComponent($(targetInput).val()) : "";
+        $(e.currentTarget).data('targetinput', targetInput);
+        if (browseFor === "file") {
+          $(e.currentTarget).find("#chooser_title").text("{{_('Select File')}}");
+          chooserIfrm.attr("src", `{{url_for('app.filechooser')}}?path=${val}`);
+        } else if (browseFor === "folder") {
+          $(e.currentTarget).find("#chooser_title").text("{{_('Select Folder')}}");
+          chooserIfrm.attr("src", `{{url_for('app.pathchooser')}}?path=${val}`);
+        }
+      }
+    });
+
+    $("#chooser_confirm_button").click((event) => {
+      const dialog = $("#path_chooser");
+      const targetInput = dialog.data('targetinput');
+      if (targetInput) {
+        $(targetInput).val(dialog.find("#path_p").text());
+      }
+      dialog.modal('hide');
+      event.preventDefault();
+    });
+  }
+
+  pathchooserChanged(iframe) {
+    const path_p = $("#path_p");
+    path_p.text(iframe.cwd);
+    path_p.prop("title", iframe.cwd);
+    $("#chooser_confirm_button").prop("disabled", !iframe.submit);
+    $("#path_type0").prop("checked", !iframe.isabsolute);
+    $("#path_type1").prop("checked", iframe.isabsolute);
+  }
+}
+
+class ApikeysUI {
+  constructor() {
+    this.currentUserName = "";
+    this.initApiKeyGen();
+  }
+
+  initApiKeyGen() {
+    $('#apikeys_box').on('shown.bs.modal', (event) => {
+      this.currentUserName = $(event.relatedTarget).attr("id").split("|")[0];
+      this.loadApiKeys();
+    }).off('click', '#apikeyAddBtn').on('click', '#apikeyAddBtn', (event) => {
+      this.modalGenerateApikey().then((key) => {
+        this.modalShowApikey(key).then(() => {
+          this.loadApiKeys();
+          this.modalSwitch("Main");
+        })
+      }).catch(() => {
+        this.modalSwitch("Main");
+      })
+    }).off('click', '.delete_apikey').on('click', '.delete_apikey', (event) => {
+      const keyId = $(event.currentTarget).attr("id").split("|")[0];
+      uiHandler.yesNoDialog("{{_('Are you sure you want to delete this API key?')}}", (answer) => {
+        if (answer) {
+          this.deleteApiKey(keyId).then(() => {
+            this.loadApiKeys();
+          }).catch((errMsg) => {
+            uiHandler.indicateFail(errMsg);
+          })
+        }
+      });
+    });
+    this.modalSwitch("Main");
+  }
+
+  modalGenerateApikey() {
+    return new Promise((resolve, reject) => {
+      this.modalSwitch("Gen");
+      $('#apikeyUser').val(this.currentUserName);
+      const apikeyExpiration = $('#apikeyExpiration');
+      const now = new Date();
+      const plusOneMinute = new Date(now.getTime() + 60000);
+      apikeyExpiration.attr('min', timestampToLocalISOTime(plusOneMinute));
+      $("#apikeyGenSubmitBtn").off('click').on('click', (event) => {
+        if ($("#apikeyGenForm")[0].reportValidity()) {
+          $(event.currentTarget).prop('disabled', true);
+          const password = $('#apikeyPassword').val().trim();
+          const keyName = $('#apikeyName').val().trim();
+          let expiresAt = apikeyExpiration.val().trim();
+          expiresAt = expiresAt ? new Date(expiresAt).getTime() : 0
+          if (this.currentUserName && password && keyName) {
+            this.generateApiKey(password, keyName, expiresAt).then((key) => {
+              resolve(key);
+            }).catch((errMsg) => {
+              uiHandler.indicateFail(errMsg);
+              reject();
+            });
+          }
+          $(event.currentTarget).prop('disabled', false);
+        }
+      });
+      $("#apikeyGenCancelBtn").off('click').on('click', (event) => {
+        reject();
+      });
+    })
+  }
+
+  modalShowApikey(key) {
+    return new Promise((resolve) => {
+      const apikeyKey = $("#apikeyGeneratedKey");
+      this.modalSwitch("Copy");
+      apikeyKey.val(key);
+      $('#apikeyCopyDismissBtn').one('click', (event) => {
+        apikeyKey.val("");
+        resolve();
+      })
+      $('#apikeyCopyBtn').off('click').on('click', (event) => {
+        const btn = $(event.currentTarget);
+        navigator.clipboard.writeText(key).then(() => {
+          const originalContent = btn.html();
+          const originalClass = btn.attr('class');
+          btn.html('<span class="glyphicon glyphicon-ok"></span> Copied!');
+          btn.attr('class', "btn btn-success");
+          setTimeout(() => {
+            btn.html(originalContent);
+            btn.attr('class', originalClass);
+          }, 2500);
+        })
+      })
+    })
+  }
+
+  modalSwitch(mode) {
+    const modes = ["Main", "Gen", "Copy"]
+    modes.forEach(m => {
+      const methodName = m === mode ? "removeClass" : "addClass";
+      $(`#apikey${m}Content`)[methodName]('hidden');
+      $(`#apikey${m}Footer`)[methodName]('hidden');
+    })
+    $('#apikeyGenForm').trigger('reset');
+    $('#apikeyCopyForm').trigger('reset');
+    $("#apikeyGeneratedKey").val('');
+  }
+
+  loadApiKeys() {
+    uiHandler.indicateLoad();
+    const tbody = $('#apikeysTbody');
+    $.post({
+      url: "{{url_for('json.get_apikeys')}}",
+      dataType: 'json',
+      contentType: 'application/json',
+      data: JSON.stringify({ user: this.currentUserName }),
+      success: (response) => {
+        uiHandler.indicateFinish();
+        if (!response.success) {
+          tbody.html('<tr><td colspan="5" class="text-danger">Error loading API keys</td></tr>');
+          return;
         }
 
-        searchInput.attr('placeholder', "{{_('Name of plugin')}}");
-        searchInput.removeAttr('disabled');
-        searchInput.on('input', function () {
-            var query = searchInput.val();
-            var visible = Boolean(query);
-            searchInput.siblings('.close').toggleClass('hidden', !visible);
-            search(query.trim());
-        });
-        searchInput.siblings('.close').click(function() {
-            searchInput.val('').focus().trigger('input');
-        });
-        searchInput.focus();
-        searchInput.trigger('input')
+        if (!response.data || response.data.length === 0) {
+          tbody.html('<tr><td colspan="5" class="text-center">No API keys yet</td></tr>');
+          return;
+        }
 
-    };
-    a.prototype.menuClick = function(h) {
-        var c, b, g, f, d;
-        d = $(this).attr('id').split('|'), c = d[0], g = d[1];
-        b = $(this).text();
-        f = c === 'core' ? generalPanel : pluginPanel;
-        $.get({
-            url: "{{url_for('json.load_config')}}",
-            data: {category: c, section: g},
-            traditional: true,
-            success: function(e) {
-                f.html(e);
-            }
-        })
-    };
-    a.prototype.configSubmit = function(d) {
-        var category, b;
-        category = $(this).attr('id').split("_")[0];
-        $.ajax({
-            method: "post",
-            url: "{{url_for('json.save_config')}}" + "?category=" + category,
-            data: $("#" + category + "_form").serialize(),
-            async: true,
-            success: function () {
-                indicateSuccess("{{_('Settings saved')}}");
-            }
-        })
-        .fail(function () {
-            indicateFail("{{_('Error occurred')}}");
+        let html = '';
+        $.each(response.data, (index, keyInfo) => {
+          const createdDate = new Date(keyInfo.created_at).toLocaleString();
+          const expiresDate = keyInfo.expires_at ? new Date(keyInfo.expires_at).toLocaleString() : 'Never';
+          const lastUsedDate = keyInfo.last_used ? new Date(keyInfo.last_used).toLocaleString() : 'Never';
+          html += `
+                    <tr>
+                        <td>${keyInfo.name}</td>
+                        <td>${createdDate}</td>
+                        <td>${expiresDate}</td>
+                        <td>${lastUsedDate}</td>
+                        <td>
+                            <button class="btn btn-xs btn-danger delete_apikey" id="${keyInfo.id}|delkey">
+                                <span class="glyphicon glyphicon-trash"></span> Delete
+                            </button>
+                        </td>
+                    </tr>
+                `;
         });
-        d.stopPropagation();
-        d.preventDefault();
-    };
-    a.prototype.addAccount = function(c) {
-        $(this).attr('disabled', true);
-        $.ajax({
-            method: "post",
-            url: "{{url_for('json.add_account')}}",
-            async: true,
-            data: $("#add_account_form").serialize(),
-            success: function () {
-                sessionStorage.setItem("activeTab", "#accounts");
-                return window.location.reload();
-            }
-        })
-        .fail(function() {
-            indicateFail("{{_('Error occurred')}}");
-        });
-        $(this).attr('disabled', false);
-        c.preventDefault();
-    };
-    a.prototype.submitAccounts = function(c) {
-        indicateLoad();
-        $.ajax({
-            method: "post",
-            url: "{{url_for('json.update_accounts')}}",
-            data: $("#account_form").serialize(),
-            async: true,
-            success: function () {
-                sessionStorage.setItem("activeTab", "#accounts");
-                return window.location.reload();
-            }
-        })
-        .fail(function() {
-            indicateFail("{{_('Error occurred')}}");
-        });
-        c.preventDefault();
-    };
-    a.prototype.submitUsers = function(c) {
-        indicateLoad();
-        $.ajax({
-            method: "post",
-            url: "{{url_for('json.update_users')}}",
-            data: $("#user_form").serialize(),
-            async: true,
-            success: function () {
-                sessionStorage.setItem("activeTab", "#users");
-                return window.location.reload();
-            }
-        })
-        .fail(function() {
-            indicateFail("{{_('Error occurred')}}");
-        });
-        c.preventDefault();
-    };
-    a.prototype.initPathcooser = function () {
-        $("#path_type0, #path_type1").click(function () {
-            var iframe = document.getElementById('chooser_ifrm').contentWindow;
-            var isabsolute = $(this).val() === "1";
-            if (isabsolute !== iframe.isabsolute) {
-                iframe.location.href = isabsolute ? iframe.abspath : iframe.relpath;
-            }
-            return false;
-        });
-        $("#path_chooser").on("show.bs.modal", function (e) {
-            var chooserIfrm = $(this).find("#chooser_ifrm");
-            var browseFor = $(e.relatedTarget).data('browsefor');
-            var targetInput = $(e.relatedTarget).data('targetinput').replace("|", "\\|");
+        tbody.html(html);
+      },
+    }).fail(() => {
+      uiHandler.indicateFinish();
+      tbody.html('<tr><td colspan="5" class="text-danger">Error loading API keys</td></tr>');
+    });
+  }
 
-            if (browseFor) {
-                chooserIfrm.height(Math.max($(window).height()-200,  150));
-                var val = targetInput ? encodeURIComponent($(targetInput).val()) : "";
-                $(this).data('targetinput', targetInput);
-                if (browseFor === "file") {
-                    $(this).find("#chooser_title").text("{{_('Select File')}}");
-                    chooserIfrm.attr("src", "{{url_for('app.filechooser')}}?path=" + val);
-                }
-                else if (browseFor === "folder") {
-                    $(this).find("#chooser_title").text("{{_('Select Folder')}}");
-                    chooserIfrm.attr("src", "{{url_for('app.pathchooser')}}?path=" + val);
-                }
-            }
-        });
-        $("#chooser_confirm_button").click(function () {
-            var dialog = $("#path_chooser");
-            var targetInput = dialog.data('targetinput');
-            if (targetInput) {
-                $(targetInput).val(dialog.find("#path_p").text());
-            }
-            dialog.modal('hide');
-            event.preventDefault();
-        });
-    };
-    a.prototype.pathchooserChanged = function(iframe) {
-        var path_p = $("#path_p");
-        path_p.text(iframe.cwd);
-        path_p.prop("title", iframe.cwd);
-        $("#chooser_confirm_button").attr("disabled", !iframe.submit);
-        $("#path_type0").prop("checked", !iframe.isabsolute);
-        $("#path_type1").prop("checked", iframe.isabsolute);
-    };
-    return a;
-})();
+  generateApiKey(password, keyName, expiresAt) {
+    return new Promise((resolve, reject) => {
+      uiHandler.indicateLoad();
+      $.post({
+        url: "{{url_for('json.generate_apikey')}}",
+        dataType: 'json',
+        contentType: 'application/json',
+        data: JSON.stringify({
+          user: this.currentUserName,
+          password: password,
+          name: keyName,
+          expires: expiresAt,
+        }),
+        success: (response) => {
+          uiHandler.indicateFinish();
+          if (!response.success) {
+            reject(response.error);
+          } else {
+            resolve(response.data.key);
+          }
+        }
+      }).fail(() => {
+        uiHandler.indicateFinish();
+        reject("{{_('Error occurred')}}");
+      });
+    })
+  }
+
+  deleteApiKey(keyId) {
+    return new Promise((resolve, reject) => {
+      uiHandler.indicateLoad();
+      $.post({
+        url: "{{url_for('json.delete_apikey')}}",
+        dataType: 'json',
+        contentType: 'application/json',
+        data: JSON.stringify({
+          user: this.currentUserName,
+          key: Number(keyId),
+        }),
+        success: (response)=> {
+          uiHandler.indicateFinish();
+          if (!response.success) {
+            reject(response.error);
+          } else {
+            resolve();
+          }
+        }
+      }).fail(() => {
+        uiHandler.indicateFinish();
+        reject("{{_('Error occurred')}}");
+      });
+    })
+  }
+}
 
 {% endautoescape %}

@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import inspect
 import re
 import time
@@ -74,6 +73,9 @@ class BaseHoster(BasePlugin):
         #: time.time() + wait in seconds
         self.waiting = False
 
+        #: Plugin is long waiting (> max_wait)
+        self.long_waiting = False
+
         #: Account handler instance, see :py:class:`Account`
         self.account = None
         self.premium = None
@@ -111,7 +113,7 @@ class BaseHoster(BasePlugin):
             pass
 
         try:
-            pw = self.account.info["login"]["password"]
+            pw = self.account.get_login("password")
             hidden_pw = "*" * 10
             args = tuple(arg.replace(pw, hidden_pw) for arg in args if arg)
         except (AttributeError, KeyError, TypeError):
@@ -163,7 +165,7 @@ class BaseHoster(BasePlugin):
                 self.classname, self.account.user
             )
             # NOTE: Avoid one unnecessary get_info call by `self.account.premium` here
-            self.premium = self.account.info["data"]["premium"]
+            self.premium = self.account.get_data("premium")
         else:
             self.req = self.pyload.request_factory.get_request(self.classname)
             self.premium = False
@@ -318,7 +320,7 @@ class BaseHoster(BasePlugin):
             return False
 
         old_wait_until = self.pyfile.wait_until
-        new_wait_until = time.time() + wait_time + float(not strict)
+        new_wait_until = time.monotonic() + wait_time + float(not strict)
 
         self.log_debug(
             "WAIT set to timestamp {}".format(new_wait_until),
@@ -338,18 +340,20 @@ class BaseHoster(BasePlugin):
         if seconds is not None:
             self.set_wait(seconds)
 
-        wait_time = self.pyfile.wait_until - time.time()
+        wait_time = self.pyfile.wait_until - time.monotonic()
 
         if wait_time < 1:
             self.log_warning(self._("Invalid wait time interval"))
             return
 
+        long_waiting = wait_time > self.config.get('max_wait', 10) * 60
         if reconnect is None:
-            reconnect = wait_time > self.config.get("max_wait", 10) * 60
+            reconnect = long_waiting
 
         self.set_reconnect(reconnect)
 
         self.waiting = True
+        self.long_waiting = long_waiting
 
         status = self.pyfile.status  # NOTE: Recheck in 0.6.x
         self.pyfile.set_status("waiting")
@@ -362,17 +366,18 @@ class BaseHoster(BasePlugin):
                 self.log_warning(self._("Reconnection ignored due logged account"))
 
         if not self.want_reconnect or self.account:
-            while self.pyfile.wait_until > time.time():
+            while self.pyfile.wait_until > time.monotonic():
                 self.check_status()
                 time.sleep(2)
 
         else:
-            while self.pyfile.wait_until > time.time():
+            while self.pyfile.wait_until > time.monotonic():
                 self.check_status()
                 self.thread.m.reconnecting.wait(1)
 
                 if self.thread.m.reconnecting.is_set():
                     self.waiting = False
+                    self.long_waiting = False
                     self.want_reconnect = False
 
                     self.req.clear_cookies()
@@ -381,6 +386,7 @@ class BaseHoster(BasePlugin):
                 time.sleep(2)
 
         self.waiting = False
+        self.long_waiting = False
         self.pyfile.status = status  # NOTE: Recheck in 0.6.x
 
     def skip(self, msg=""):
@@ -505,7 +511,9 @@ class BaseHoster(BasePlugin):
         self.check_status()
         return super().load(*args, **kwargs)
 
-    def parse_html_form(self, attr_str="", input_names={}):
+    def parse_html_form(self, attr_str="", input_names=None):
+        input_names = input_names or {}
+
         return parse_html_form(attr_str, self.data, input_names)
 
     def get_password(self):

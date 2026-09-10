@@ -1,5 +1,7 @@
-# -*- coding: utf-8 -*-
+import base64
+import re
 
+from pyload.core.utils.convert import to_str
 
 from ..anticaptchas.ReCaptcha import ReCaptcha
 from ..anticaptchas.SolveMedia import SolveMedia
@@ -9,10 +11,10 @@ from ..base.simple_downloader import SimpleDownloader
 class MediafireCom(SimpleDownloader):
     __name__ = "MediafireCom"
     __type__ = "downloader"
-    __version__ = "1.00"
+    __version__ = "1.02"
     __status__ = "testing"
 
-    __pattern__ = r"https?://(?:www\.)?mediafire\.com/(file/|view/\??|download(\.php\?|/)|\?)(?P<ID>\w+)"
+    __pattern__ = r"https?://(?:www\.)?mediafire\.com/(file(?:_premium)?/|view/\??|download(\.php\?|/)|\?)(?P<ID>\w+)"
     __config__ = [
         ("enabled", "bool", "Activated", True),
         ("use_premium", "bool", "Use premium account if available", True),
@@ -91,4 +93,9 @@ class MediafireCom(SimpleDownloader):
                 if self.PASSWORD_PATTERN in self.data:
                     self.fail(self._("Wrong password"))
 
-        return super().handle_free(pyfile)
+        m = re.search(r'data-scrambled-url="([^"]+)"', self.data)
+        if m is not None:
+            self.link = to_str(base64.b64decode(m.group(1)))
+
+        else:
+            super().handle_free(pyfile)

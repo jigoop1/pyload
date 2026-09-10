@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import json
 
 import pycurl
@@ -30,11 +28,9 @@ class DebridplanetCom(MultiDownloader):
     API_URL = "https://debridplanet.com/v1/"
 
     def api_request(self, method, **kwargs):
-        token = self.account.info["data"].get("token")
+        token = self.account.get_data("token")
         if token is not None:
-            self.req.http.c.setopt(
-                pycurl.HTTPHEADER, ["Authorization: Bearer " + token]
-            )
+            self.req.http.set_header("Authorization", f"Bearer {token}")
         json_data = self.load(f"{self.API_URL}{method}.php", post=json.dumps(kwargs))
         return json.loads(json_data)
 

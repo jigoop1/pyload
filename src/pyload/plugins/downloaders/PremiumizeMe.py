@@ -1,4 +1,3 @@
-# -*- coding: utf-8 -*-
 import json
 import re
 
@@ -44,7 +43,7 @@ class PremiumizeMe(MultiDownloader):
             res = self.api_respond(
                 "transfer/directdl",
                 src=pyfile.url,
-                apikey=self.account.info['login']['password']
+                apikey=self.account.get_login('password')
             )
 
             if res['status'] == "success":
@@ -59,7 +58,7 @@ class PremiumizeMe(MultiDownloader):
             res = self.api_respond(
                 "item/details",
                 id=m.group('ID'),
-                apikey=self.account.info['login']['password']
+                apikey=self.account.get_login('password')
             )
 
             if res.get('status') != "error":

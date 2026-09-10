@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import hashlib
 import json
 
@@ -39,13 +37,9 @@ class LinkifierCom(MultiDownloader):
             "apiKey": self.API_KEY,
         }
         post.update(kwargs)
-        self.req.http.c.setopt(
-            pycurl.HTTPHEADER, ["Content-Type: application/json; charset=utf-8"]
-        )
+        self.req.http.set_header("Content-Type", "application/json; charset=utf-8")
         res = json.loads(self.load(self.API_URL + method, post=json.dumps(post)))
-        self.req.http.c.setopt(
-            pycurl.HTTPHEADER, ["Content-Type: text/html; charset=utf-8"]
-        )
+        self.req.http.set_header("Content-Type", "text/html; charset=utf-8")
         return res
 
     def setup(self):
@@ -55,7 +49,7 @@ class LinkifierCom(MultiDownloader):
         json_data = self.api_request(
             "stream",
             self.account.user,
-            self.account.info["login"]["password"],
+            self.account.get_login("password"),
             url=pyfile.url,
         )
 

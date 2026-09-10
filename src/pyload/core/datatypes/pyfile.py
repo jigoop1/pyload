@@ -1,5 +1,3 @@
-# -*- coding: utf-8 -*-
-
 import time
 from threading import RLock
 
@@ -65,7 +63,7 @@ class PyFile:
         self.plugin = None
         # self.download = None
 
-        self.wait_until = 0  #: time.time() + time to wait
+        self.wait_until = 0  #: time.monotonic() + time to wait
 
         # status attributes
         self.active = False  #: obsolete?
@@ -146,7 +144,7 @@ class PyFile:
         if self.packageid > 0:
             self.sync()
 
-        if hasattr(self, "plugin") and self.plugin:
+        if self.has_plugin():
             self.plugin.clean()
             del self.plugin
 
@@ -225,7 +223,7 @@ class PyFile:
         """
         formats and return wait time in human readable format.
         """
-        seconds = int(self.wait_until - time.time())
+        seconds = int(self.wait_until - time.monotonic())
         return format.time(seconds, literally=False)
 
     def format_size(self):
